@@ -22,7 +22,7 @@ setup(
     license="GPL",
     keywords="Netica, Bayesian Network",
     packages=find_packages(),
-    install_requires=["logging", "ctypes", "numpy"],
+    install_requires=["logging", "ctypes", "numpy"],  # first 2 are in stdlib
     long_description=read('README'),
     classifiers=[
         "Development Status :: 3 - Alpha",
