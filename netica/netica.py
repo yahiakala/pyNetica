@@ -2,16 +2,21 @@
 
 """Created in 2012-2016 by Kees Den Heijer (C.denheijer@tudelft.nl)"""
 
+# Check out http://www.norsys.com/onLineAPIManual/index.html
+# Check out https://docs.python.org/3.6/library/ctypes.html
+
 
 import os
-from ctypes import (cdll, c_char, c_char_p, c_void_p, c_int, c_double,
+from ctypes import (CDLL, c_char, c_char_p, c_void_p, c_int, c_double,
                     create_string_buffer, c_bool, POINTER, byref)
 from numpy.ctypeslib import ndpointer
 import numpy as np
 from numpy import array
 import platform
-# import exceptions
 import logging
+import sys
+
+from helpers import getnodedata
 
 logger = logging.getLogger(__name__)
 c_double_p = POINTER(c_double)
@@ -24,18 +29,33 @@ MINIMIZED_WINDOW = 0x30
 REGULAR_WINDOW = 0x70
 
 if 'window' in platform.system().lower():
-
-    from ctypes import windll
-
     NETICA_LIB = os.path.join(os.path.split(__file__)[0], '..',
                               'lib', 'Netica.dll')
-
 else:
-
     #    from ctypes import cdll
-
     NETICA_LIB = os.path.join(os.path.split(__file__)[0], '..',
                               'lib', 'libnetica.so')
+
+# Check if the C Library is there.
+if not os.path.exists(NETICA_LIB):
+    # library Netica.dll or libnetica.so not found
+    err = RuntimeError('"%s" NOT FOUND at\n %s' %
+                       (os.path.split(NETICA_LIB)[-1], NETICA_LIB))
+    logger.error(err)
+    raise err
+else:
+    # Load the C Library.
+    ln = CDLL(NETICA_LIB)
+
+
+def ccharp(inpstr):
+    """Make sure input strings are c_char_p bytes objects."""
+    # https://stackoverflow.com/questions/23852311/different-behaviour-of-ctypes-c-char-p  # noqa
+    if sys.version_info < (3, 0) or 'bytes' in str(type(inpstr)):
+        outstr = inpstr
+    else:
+        outstr = inpstr.encode('utf-8')
+    return outstr
 
 
 class Netica:
@@ -54,13 +74,9 @@ class Netica:
 
             raise err
 
-        # self.ln = windll.LoadLibrary(NETICA_LIB)
-
-        # TODO: use cdll
-
         if 'window' in platform.system().lower():
 
-            self.ln = windll.LoadLibrary(NETICA_LIB)
+            self.ln = CDLL(NETICA_LIB)
 
         else:
 
@@ -79,7 +95,7 @@ class Netica:
         return self.ln.NewNeticaEnviron_ns(None, None, None)  # env_p
 
     def initenv(self, env_p):
-        """Initialize Environment."""
+        """Initialize Specified Environment."""
         mesg = create_string_buffer(MESGLEN)
 
         # (environ_ns* env, char* mesg)
@@ -118,7 +134,7 @@ class Netica:
 
         self.ln.NewNet_bn.restype = c_void_p
 
-        return self.ln.NewNet_bn(name, env_p)  # net_p
+        return self.ln.NewNet_bn(ccharp(name), env_p)  # net_p
 
     def opennet(self, env_p, name):
         """Create new stream and read net, returning a net pointer."""
@@ -140,7 +156,7 @@ class Netica:
 
         self.ln.NewFileStream_ns.restype = c_void_p
 
-        name = create_string_buffer(name)
+        name = create_string_buffer(ccharp(name))
 
         return self.ln.NewFileStream_ns(name, env_p, None)  # file_p
 
@@ -271,7 +287,7 @@ class Netica:
 
         # nodename = create_string_buffer(nodename)
 
-        node_p = self.ln.GetNodeNamed_bn(nodename, net_p)
+        node_p = self.ln.GetNodeNamed_bn(ccharp(nodename), net_p)
 
         if node_p is None:
 
@@ -368,7 +384,14 @@ class Netica:
         return self.ln.GetNodeBeliefs_bn(node_p)  # prob_bn
 
     def getnetnodes(self, net_p):
-        """Get net nodes."""
+        """
+        Get net nodes.
+
+        Input a net_bn object. Returns a nodelist_bn object.
+        """
+        # GetNetNodes2_bn is not listed in the API manual, but GetNetNodes_bn
+        # is. Looks like an update to the API that is undocumented.
+        # TODO: Figure out how to export a list of names from object.
         zerochar_type = c_char * 0
 
         # (const net_bn* net, const char options[])
@@ -491,7 +514,7 @@ class Netica:
 
         self.ln.SetNodeEquation_bn.restype = None
 
-        self.ln.SetNodeEquation_bn(node_p, eqn)
+        self.ln.SetNodeEquation_bn(node_p, ccharp(eqn))
 
     def setnodetitle(self, node_p, title):
         """Set the node title."""
@@ -499,17 +522,23 @@ class Netica:
 
         self.ln.SetNodeTitle_bn.restype = None
 
-        self.ln.SetNodeTitle_bn(node_p, title)
+        self.ln.SetNodeTitle_bn(node_p, ccharp(title))
 
     def setnodestatenames(self, node_p, state_names):
-        """Set the node state names."""
+        """
+        Set the node state names.
+
+        state_names is a single string with commas and/or whitespace
+        separators. It can also be newlines. Make sure the number
+        of names is consistent with the actual number of states.
+        """
         # (node_bn* node, const char* state_names)
 
         self.ln.SetNodeStateNames_bn.argtypes = [c_void_p, c_char_p]
 
         self.ln.SetNodeStateNames_bn.restype = None
 
-        self.ln.SetNodeStateNames_bn(node_p, state_names)
+        self.ln.SetNodeStateNames_bn(node_p, ccharp(state_names))
 
     def setnodestatetitle(self, node_p, state, state_title):
         """Set the node state title(s)."""
@@ -517,7 +546,7 @@ class Netica:
 
         self.ln.SetNodeStateTitle_bn.restype = None
 
-        self.ln.SetNodeStateTitle_bn(node_p, state, state_title)
+        self.ln.SetNodeStateTitle_bn(node_p, state, ccharp(state_title))
 
     def setnodelevels(self, node_p, num_states, levels):
         """Set the node levels."""
@@ -644,7 +673,7 @@ class Netica:
 
         self.ln.NewNode_bn.restype = c_void_p
 
-        return self.ln.NewNode_bn(name, num_states, net_p)  # node_p
+        return self.ln.NewNode_bn(ccharp(name), num_states, net_p)  # node_p
 
     def deletenode(self, node_p=None):
         """
@@ -717,3 +746,5 @@ class Netica:
         self.ln.ReverseLink_bn.restype = None
 
         return self.ln.SwitchNodeParent_bn(link_index, node_p, new_parent)
+
+    getnodedata = getnodedata
