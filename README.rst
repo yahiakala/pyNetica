@@ -4,18 +4,21 @@ pyNetica (netica): Python wrapper for Netica C API
 
 Prerequisites
 -------------
-This package requires the Netica C Library (.dll or .so)
-but it has only been tested on Windows. You must obtain the library yourself
+This package requires the Netica C API Library (.dll or .so) to be inserted
+into the /lib folder. So far, it has only been tested on Windows (.dll).
+You must obtain the library yourself
 from www.norsys.com. There is a free version for download which allows
 you to manipulate networks of a limited size. Note that Netica offers two
-licenses for users who want to work with large networks:
-* Netica Application license
-* Netica API Family license
+mutually exclusive (and similarly priced) licenses for users who want to
+work with large networks:
+
+* Netica Application license (Work through the GUI only)
+* Netica API Family license (C, C#, C++, Java, Matlab, Visual Basic, etc.)
 
 
 Installation
 ------------
-* Fork the repo
+* Fork the repo (or just clone if you don't want to develop)
 * Clone to your desktop
 * Navigate to the folder and in your prompt:
 
@@ -57,4 +60,4 @@ New workflow:
 
 Credits
 -------
-Credit goes to Kees den Heijer (cdenheijer@tudelft.nl) for getting this started.
+Credit goes to Kees den Heijer (c.denheijer@tudelft.nl) for getting this started.
