@@ -1,2 +1,1 @@
-from .netica import Netica  # noqa
-from .helpers import getnodedata  # noqa
+from .netica import NeticaNetwork  # noqa

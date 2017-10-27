@@ -194,18 +194,20 @@ class NeticaNetwork:
         # Create net.
         if openfile:
             # Read net from file.
-            file_p = self._newstream(self.env, openfile)  # Create stream.
+            file_p = self._newstream(openfile)  # Create stream.
             # Net pointer.
             # (stream_ns* file, int options)
             self.net = cnetica.ReadNet_bn(file_p, REGULAR_WINDOW)
         else:
             # Create new empty net.
             # (const char* name, environ_ns* env)
+            # TODO: Figure out significance of name arg.
             self.net = cnetica.NewNet_bn(ccharp('BayesNet'), self.env)
-
+        self.setautoupdate()  # Auto update on by default.
     # --------------------------------------------------------------------
     # Methods involving file operations.
     # --------------------------------------------------------------------
+
     def closeenv(self):
         """
         Close environment.
@@ -221,7 +223,7 @@ class NeticaNetwork:
 
     def savenet(self, name):
         """Create new stream and write Netica file."""
-        file_p = self._newstream(self.env, name)
+        file_p = self._newstream(name)
         # (const net_bn* net, stream_ns* file)
         cnetica.WriteNet_bn(self.net, file_p)
 
@@ -268,19 +270,22 @@ class NeticaNetwork:
     # --------------------------------------------------------------------
     # Methods that create or delete nodes.
     # --------------------------------------------------------------------
-    def newnode(self, name=None, num_states=0, net_p=None):
+    def newnode(self, name=None, num_states=0):
         """Create and return a new node."""
         # (const char* name, int num_states, net_bn* net)
-        return cnetica.NewNode_bn(ccharp(name), num_states, net_p)
+        return cnetica.NewNode_bn(ccharp(name), num_states, self.net)
 
-    def deletenode(self, node_p=None):
+    def deletenode(self, nodename=None, node_p=None):
         """
         Remove node from net.
 
         Removes node from its net, and frees all resources (e.g. memory)
         it was using.
 
+        Defaults to using nodename.
         """
+        if nodename:
+            node_p = self.getnodenamed(nodename)
         # (node_bn* node)
         cnetica.DeleteNode_bn(node_p)
     # --------------------------------------------------------------------
@@ -291,7 +296,11 @@ class NeticaNetwork:
     # Methods that get values from nodes.
     # --------------------------------------------------------------------
     def getnodenamed(self, nodename):
-        """Get node object by name."""
+        """
+        Get node object by name.
+
+        Node names are unique within a net, but node titles are not.
+        """
         # nodename = create_string_buffer(nodename)
         # (const char* name, const net_bn* net)
         node_p = cnetica.GetNodeNamed_bn(ccharp(nodename), self.net)
@@ -304,19 +313,28 @@ class NeticaNetwork:
         # (const node_bn* node)
         return cnetica.GetNodeName_bn(node_p)  # name
 
-    def nthnode(self, nl_p, index):
+    def nthnode(self, nl_p=None, index=0):
         """
         Get the node pointer.
 
         Returns the node pointer at position "index" within list of
-        nodes "nl_p"
+        nodes "nl_p". Default for nl_p is the entire list in self.
 
         """
+        if not nl_p:
+            nl_p = self.getnetnodes()
         # (const nodelist_bn* nodes, int index)
         return cnetica.NthNode_bn(nl_p, index)  # node_p
 
-    def getnodebeliefs(self, node_p):
-        """Get node beliefs."""
+    def getnodebeliefs(self, nodename=None, node_p=None):
+        """
+        Get node beliefs.
+
+        Will default to using nodename if it exists.
+        """
+        if nodename:
+            node_p = self.getnodenamed(nodename)
+
         nstates = self.getnodenumberstates(node_p)
         cnetica.GetNodeBeliefs_bn.argtypes = [c_void_p]
         cnetica.GetNodeBeliefs_bn.restype = ndpointer(
@@ -324,12 +342,19 @@ class NeticaNetwork:
         # (node_bn* node)
         return cnetica.GetNodeBeliefs_bn(node_p)  # prob_bn
 
-    def getnodenumberstates(self, node_p):
-        """Get number of states."""
+    def getnodenumberstates(self, nodename=None, node_p=None):
+        """
+        Get number of states in a node.
+
+        Will default to using nodename if it exists.
+        """
+        if nodename:
+            node_p = self.getnodenamed(nodename)
+
         # (const node_bn* node)
         return cnetica.GetNodeNumberStates_bn(node_p)  # nstates
 
-    def getnodelevels(self, node_p):
+    def getnodelevels(self, nodename=None, node_p=None):
         """
         Get node levels.
 
@@ -339,6 +364,9 @@ class NeticaNetwork:
         from discrete nodes to real numbers.
 
         """
+        if nodename:
+            node_p = self.getnodenamed(nodename)
+
         node_type = self.getnodetype(node_p)
         nstates = self.getnodenumberstates(node_p)
         if node_type == 1:
@@ -358,7 +386,7 @@ class NeticaNetwork:
         else:
             return None
 
-    def getnodestatename(self, node_p, state=0):
+    def getnodestatename(self, nodename=None, state=0, node_p=None):
         """
         Get node state name.
 
@@ -369,10 +397,13 @@ class NeticaNetwork:
         Either all of the states have names, or none of them do.
 
         """
+        if nodename:
+            node_p = self.getnodenamed(nodename)
+
         # GetNodeStateName_bn (	const node_bn*  node,   state_bn  state )
         return cnetica.GetNodeStateName_bn(node_p, state)  # node_levels
 
-    def getnodetype(self, node_p):
+    def getnodetype(self, nodename=None, node_p=None):
         """
         Get node type.
 
@@ -380,6 +411,8 @@ class NeticaNetwork:
         discrete (digital), and CONTINUOUS_TYPE if it is continuous (analog)
 
         """
+        if nodename:
+            node_p = self.getnodenamed()
         # (const node_bn* node)
         return cnetica.GetNodeType_bn(node_p)  # node_type
 
@@ -413,7 +446,7 @@ class NeticaNetwork:
         # expected value. Also tweaks stdev.value
         expvalue = cnetica.GetNodeExpectedValue_bn(node_p,
                                                    byref(stdev), x3, x4)
-
+        # TODO: stdev is always 9999
         return expvalue, stdev.value
 
     def getnodeprobs(self, node_p, parent_states):
@@ -506,7 +539,15 @@ class NeticaNetwork:
         cnetica.SetNodeStateTitle_bn(node_p, state, ccharp(state_title))
 
     def setnodelevels(self, node_p, num_states, levels):
-        """Set the node levels."""
+        """
+        Set the node levels.
+
+        If underlying variable is continuous, num_states = len(levels)-1
+        If underlying variable is discrete, num_states = len(levels)
+
+        On a fresh new node, it will assign the node type as continuous
+        or discrete depending on the input.
+        """
         # (node_bn* node, int num_states, const level_bn* levels)
         cnetica.SetNodeLevels_bn.argtypes = [c_void_p, c_int, ndpointer(
             'double', ndim=1, shape=(len(levels),), flags='C')]
@@ -605,8 +646,10 @@ class NeticaNetwork:
         node in the input node list.
 
         """
-        file_p = self._newstream(self.env, filename)
+        if not nl_p:
+            nl_p = self.getnetnodes()
 
+        file_p = self._newstream(filename)
         # (stream_ns* file, const nodelist_bn* nodes, int updating,
         #  double degree)
         cnetica.ReviseCPTsByCaseFile_bn(file_p, nl_p, updating, degree)
@@ -659,7 +702,7 @@ class NeticaNetwork:
     # --------------------------------------------------------------------
     # Self-contained methods
     # --------------------------------------------------------------------
-    getallnodedata = getnodedata
+    getnodedata = getnodedata
     # --------------------------------------------------------------------
     # End of self-contained methods
     # --------------------------------------------------------------------

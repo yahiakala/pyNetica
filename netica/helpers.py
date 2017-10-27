@@ -3,7 +3,7 @@ import numpy as np
 import sys
 
 
-def getnodedata(self, nl_p):
+def getnodedata(self, nl_p=None):
     """
     Get all data from all nodes listed in the input.
 
@@ -11,6 +11,9 @@ def getnodedata(self, nl_p):
     Output is a list of dictionaries.
     """
     nodedata = []
+    if not nl_p:
+        nl_p = self.getnetnodes()
+
     nnodes = self.lengthnodelist(nl_p)
     for idx in range(nnodes):
         node_p = self.nthnode(nl_p, idx)
