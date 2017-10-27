@@ -15,6 +15,7 @@ from numpy import array
 import platform
 import logging
 import sys
+import pdb
 
 from helpers import getnodedata
 
@@ -45,7 +46,40 @@ if not os.path.exists(NETICA_LIB):
     raise err
 else:
     # Load the C Library.
-    ln = CDLL(NETICA_LIB)
+    cnetica = CDLL(NETICA_LIB)
+
+# Set argument and result types from Netica C Functions.
+# ------------------------------------------------------------------------
+cnetica.NewNeticaEnviron_ns.argtypes = [c_char_p, c_void_p, c_char_p]
+cnetica.NewNeticaEnviron_ns.restype = c_void_p
+
+cnetica.ReadNet_bn.argtypes = [c_void_p, c_int]
+cnetica.ReadNet_bn.restype = c_void_p
+
+cnetica.InitNetica2_bn.argtypes = [c_void_p, c_char_p]
+cnetica.InitNetica2_bn.restype = c_int
+
+cnetica.CloseNetica_bn.argtypes = [c_void_p, c_char_p]
+cnetica.CloseNetica_bn.restype = c_int
+
+cnetica.NewNet_bn.argtypes = [c_char_p, c_void_p]
+cnetica.NewNet_bn.restype = c_void_p
+
+cnetica.NewFileStream_ns.argtypes = [c_char_p, c_void_p, c_char_p]
+cnetica.NewFileStream_ns.restype = c_void_p
+
+cnetica.WriteNet_bn.argtypes = [c_void_p, c_void_p]
+cnetica.WriteNet_bn.restype = None
+
+cnetica.CompileNet_bn.argtypes = [c_void_p]
+cnetica.CompileNet_bn.restype = None
+
+cnetica.SetNetAutoUpdate_bn.argtypes = [c_void_p, c_int]
+cnetica.SetNetAutoUpdate_bn.restype = None
+
+cnetica.EnterNodeValue_bn.argtypes = [c_void_p, c_double]
+cnetica.EnterNodeValue_bn.restype = None
+# ------------------------------------------------------------------------
 
 
 def ccharp(inpstr):
@@ -58,157 +92,67 @@ def ccharp(inpstr):
     return outstr
 
 
-class Netica:
-    """Wrapper for the netica .dll."""
+class NeticaNetwork:
+    """Netica Bayesian Network Class Object."""
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the Netica class."""
-        if not os.path.exists(NETICA_LIB):
+    def __init__(self, openfile=None, license=None, *args, **kwargs):
+        """Initialize the Bayesian Network class object."""
+        # Environment pointer. First arg is license.
+        self.env = cnetica.NewNeticaEnviron_ns(ccharp(license), None, None)
+        # Initialize environment.
+        mesg = create_string_buffer(MESGLEN)
+        # (environ_ns* env, char* mesg)
+        self.res = cnetica.InitNetica2_bn(self.env, mesg)
+        logger.info(mesg.value)
 
-            # library Netica.dll or libnetica.so not found
-
-            err = RuntimeError('"%s" NOT FOUND at\n %s' %
-                               (os.path.split(NETICA_LIB)[-1], NETICA_LIB))
-
-            logger.error(err)
-
-            raise err
-
-        if 'window' in platform.system().lower():
-
-            self.ln = CDLL(NETICA_LIB)
-
+        if openfile:
+            # Read net from file.
+            file_p = self._newstream(self.env, openfile)  # Create stream.
+            # Net pointer.
+            self.net = cnetica.ReadNet_bn(file_p, REGULAR_WINDOW)
         else:
+            # Create new empty net.
+            # (const char* name, environ_ns* env)
+            self.net = cnetica.NewNet_bn(ccharp('BayesNet'), self.env)
 
-            self.ln = cdll.LoadLibrary(NETICA_LIB)
-
-    #    self.ln = cdll.LoadLibrary("/Users/heijer/Downloads/Netica_API_504/lib/libnetica.so")  # noqa
-
-    def newenv(self):
-        """Open environment."""
-        # (const char* license, environ_ns* env, const char* locn)
-
-        self.ln.NewNeticaEnviron_ns.argtypes = [c_char_p, c_void_p, c_char_p]
-
-        self.ln.NewNeticaEnviron_ns.restype = c_void_p
-
-        return self.ln.NewNeticaEnviron_ns(None, None, None)  # env_p
-
-    def initenv(self, env_p):
-        """Initialize Specified Environment."""
-        mesg = create_string_buffer(MESGLEN)
-
-        # (environ_ns* env, char* mesg)
-
-        self.ln.InitNetica2_bn.argtypes = [c_void_p, c_char_p]
-
-        self.ln.InitNetica2_bn.restype = c_int
-
-        res = self.ln.InitNetica2_bn(env_p, mesg)
-
-        logger.info(mesg.value)
-
-        return res
-
-    def closeenv(self, env_p):
+    def closeenv(self):
         """Close environment."""
-        # (environ_ns* env, char* mesg)
-
-        self.ln.CloseNetica_bn.argtypes = [c_void_p, c_char_p]
-
-        self.ln.CloseNetica_bn.restype = c_int
-
         mesg = create_string_buffer(MESGLEN)
-
-        res = self.ln.CloseNetica_bn(env_p, mesg)
-
+        # (environ_ns* env, char* mesg)
+        res = cnetica.CloseNetica_bn(self.env, mesg)
         logger.info(mesg.value)
-
         return res
 
-    def newnet(self, name=None, env_p=None):
-        """Create and return a new net, initially having no nodes."""
-        # (const char* name, environ_ns* env)
-
-        self.ln.NewNet_bn.argtypes = [c_char_p, c_void_p]
-
-        self.ln.NewNet_bn.restype = c_void_p
-
-        return self.ln.NewNet_bn(ccharp(name), env_p)  # net_p
-
-    def opennet(self, env_p, name):
-        """Create new stream and read net, returning a net pointer."""
-        file_p = self._newstream(env_p, name)
-
-        return self._readnet(file_p)  # net_p
-
-    def savenet(self, env_p, net_p, name):
-        """Create new stream and write net."""
-        file_p = self._newstream(env_p, name)
-
-        self._writenet(net_p, file_p)
-
-    def _newstream(self, env_p, name):
-        """Create stream."""
-        # (const char* filename, environ_ns* env, const char* access)
-
-        self.ln.NewFileStream_ns.argtypes = [c_char_p, c_void_p, c_char_p]
-
-        self.ln.NewFileStream_ns.restype = c_void_p
-
-        name = create_string_buffer(ccharp(name))
-
-        return self.ln.NewFileStream_ns(name, env_p, None)  # file_p
-
-    def _readnet(self, file_p):
-        """Read a net from file."""
-        # (stream_ns* file, int options)
-
-        self.ln.ReadNet_bn.argtypes = [c_void_p, c_int]
-
-        self.ln.ReadNet_bn.restype = c_void_p
-
-        return self.ln.ReadNet_bn(file_p, REGULAR_WINDOW)  # net_p
-
-    def _writenet(self, net_p, file_p):
-        """Write net to a new file."""
+    def savenet(self, name):
+        """Create new stream and write Netica file."""
+        file_p = self._newstream(self.env, name)
         # (const net_bn* net, stream_ns* file)
+        cnetica.WriteNet_bn(self.net, file_p)
 
-        self.ln.WriteNet_bn.argtypes = [c_void_p, c_void_p]
+    def _newstream(self, name):
+        """
+        Create stream.
 
-        self.ln.WriteNet_bn.restype = None
+        Streams are used to prepare for file read or write.
+        """
+        # (const char* filename, environ_ns* env, const char* access)
+        name = create_string_buffer(ccharp(name))
+        return cnetica.NewFileStream_ns(name, self.env, None)  # file_p
 
-        self.ln.WriteNet_bn(net_p, file_p)
-
-    def compilenet(self, net):
+    def compilenet(self):
         """Compile net."""
         # (net_bn* net)
+        cnetica.CompileNet_bn(self.net)
 
-        self.ln.CompileNet_bn.argtypes = [c_void_p]
-
-        self.ln.CompileNet_bn.restype = None
-
-        self.ln.CompileNet_bn(net)
-
-    def setautoupdate(self, net, auto_update=1):
+    def setautoupdate(self, auto_update=1):
         """Set the auto update feature."""
         # (net_bn* net, int auto_update)
-
-        self.ln.SetNetAutoUpdate_bn.argtypes = [c_void_p, c_int]
-
-        self.ln.SetNetAutoUpdate_bn.restype = None
-
-        self.ln.SetNetAutoUpdate_bn(net, auto_update)
+        cnetica.SetNetAutoUpdate_bn(self.net, auto_update)
 
     def enternodevalue(self, node_p, value):
         """Enter node finding as value."""
         # (node_bn* node, double value)
-
-        self.ln.EnterNodeValue_bn.argtypes = [c_void_p, c_double]
-
-        self.ln.EnterNodeValue_bn.restype = None
-
-        self.ln.EnterNodeValue_bn(node_p, value)
+        cnetica.EnterNodeValue_bn(node_p, value)
 
     def enterfinding(self, node_p, state):
         """
@@ -220,12 +164,9 @@ class Netica:
 
         """
         # (	node_bn*  node,   state_bn  state )
-
-        self.ln.EnterFinding_bn.argtypes = [c_void_p, c_int]
-
-        self.ln.EnterFinding_bn.restype = None
-
-        self.ln.EnterFinding_bn(node_p, state)
+        self.cnetica.EnterFinding_bn.argtypes = [c_void_p, c_int]
+        self.cnetica.EnterFinding_bn.restype = None
+        self.cnetica.EnterFinding_bn(node_p, state)
 
     def enternodelikelyhood(self, node_p, prob_bn):
         """
@@ -237,28 +178,20 @@ class Netica:
 
         """
         nstates = self.getnodenumberstates(node_p)
-
         prob_bn = array(prob_bn, dtype='float32')
-
         # (node_bn* node, const prob_bn* likelihood)
-
-        self.ln.EnterNodeLikelihood_bn.argtypes = [c_void_p, ndpointer(
+        self.cnetica.EnterNodeLikelihood_bn.argtypes = [c_void_p, ndpointer(
             'float32', ndim=1, shape=(nstates,), flags='C')]
         # (node_bn* node, const prob_bn* likelihood)
-
-        self.ln.EnterNodeLikelihood_bn.restype = None
-
-        self.ln.EnterNodeLikelihood_bn(node_p, prob_bn)
+        self.cnetica.EnterNodeLikelihood_bn.restype = None
+        self.cnetica.EnterNodeLikelihood_bn(node_p, prob_bn)
 
     def retractnodefindings(self, node_p):
         """Retract all findings from node."""
         # (node_bn* node)
-
-        self.ln.RetractNodeFindings_bn.argtypes = [c_void_p]
-
-        self.ln.RetractNodeFindings_bn.restype = None
-
-        self.ln.RetractNodeFindings_bn(node_p)
+        self.cnetica.RetractNodeFindings_bn.argtypes = [c_void_p]
+        self.cnetica.RetractNodeFindings_bn.restype = None
+        self.cnetica.RetractNodeFindings_bn(node_p)
 
     def retractnetfindings(self, net_p):
         """
@@ -270,27 +203,18 @@ class Netica:
 
         """
         # (net_bn* net)
-
-        self.ln.RetractNetFindings_bn.argtypes = [c_void_p]
-
-        self.ln.RetractNetFindings_bn.restype = None
-
-        self.ln.RetractNetFindings_bn(net_p)
+        self.cnetica.RetractNetFindings_bn.argtypes = [c_void_p]
+        self.cnetica.RetractNetFindings_bn.restype = None
+        self.cnetica.RetractNetFindings_bn(net_p)
 
     def getnodenamed(self, nodename, net_p):
         """Get node by name."""
         # (const char* name, const net_bn* net)
-
-        self.ln.GetNodeNamed_bn.argtypes = [c_char_p, c_void_p]
-
-        self.ln.GetNodeNamed_bn.restype = c_void_p
-
+        self.cnetica.GetNodeNamed_bn.argtypes = [c_char_p, c_void_p]
+        self.cnetica.GetNodeNamed_bn.restype = c_void_p
         # nodename = create_string_buffer(nodename)
-
-        node_p = self.ln.GetNodeNamed_bn(ccharp(nodename), net_p)
-
+        node_p = self.cnetica.GetNodeNamed_bn(ccharp(nodename), net_p)
         if node_p is None:
-
             logger.warning('Node with name "%s" does not exist' % nodename)
 
         return node_p
@@ -298,12 +222,9 @@ class Netica:
     def getnodenumberstates(self, node_p):
         """Get number of states."""
         # (const node_bn* node)
-
-        self.ln.GetNodeNumberStates_bn.argtypes = [c_void_p]
-
-        self.ln.GetNodeNumberStates_bn.restype = c_int
-
-        return self.ln.GetNodeNumberStates_bn(node_p)  # nstates
+        self.cnetica.GetNodeNumberStates_bn.argtypes = [c_void_p]
+        self.cnetica.GetNodeNumberStates_bn.restype = c_int
+        return self.cnetica.GetNodeNumberStates_bn(node_p)  # nstates
 
     def getnodelevels(self, node_p):
         """
@@ -316,39 +237,23 @@ class Netica:
 
         """
         node_type = self.getnodetype(node_p)
-
         nstates = self.getnodenumberstates(node_p)
-
         if node_type == 1:
-
             # CONTINUOUS_TYPE
-
             nlevels = nstates + 1
-
         else:
-
             # DISCRETE_TYPE
-
             nlevels = nstates
 
         print(nstates, nlevels)
-
         # (const node_bn* node)
-
-        self.ln.GetNodeLevels_bn.argtypes = [c_void_p]
-
+        self.cnetica.GetNodeLevels_bn.argtypes = [c_void_p]
         T = ndpointer('double', ndim=1, shape=(nlevels,), flags='C')
-
-        self.ln.GetNodeLevels_bn.restype = c_void_p
-
-        res = self.ln.GetNodeLevels_bn(node_p)  # node_levels
-
+        self.cnetica.GetNodeLevels_bn.restype = c_void_p
+        res = self.cnetica.GetNodeLevels_bn(node_p)  # node_levels
         if res:
-
             return np.array(T(res))
-
         else:
-
             return None
 
     def getnodestatename(self, node_p, state=0):
@@ -363,25 +268,19 @@ class Netica:
 
         """
         # GetNodeStateName_bn (	const node_bn*  node,   state_bn  state )
-
-        self.ln.GetNodeStateName_bn.argtypes = [c_void_p, c_int]
-
-        self.ln.GetNodeStateName_bn.restype = c_char_p
-
-        return self.ln.GetNodeStateName_bn(node_p, state)  # node_levels
+        self.cnetica.GetNodeStateName_bn.argtypes = [c_void_p, c_int]
+        self.cnetica.GetNodeStateName_bn.restype = c_char_p
+        return self.cnetica.GetNodeStateName_bn(node_p, state)  # node_levels
 
     def getnodebeliefs(self, node_p):
         """Get node beliefs."""
         nstates = self.getnodenumberstates(node_p)
-
         # (node_bn* node)
-
-        self.ln.GetNodeBeliefs_bn.argtypes = [c_void_p]
-
-        self.ln.GetNodeBeliefs_bn.restype = ndpointer(
+        self.cnetica.GetNodeBeliefs_bn.argtypes = [c_void_p]
+        self.cnetica.GetNodeBeliefs_bn.restype = ndpointer(
             'float32', ndim=1, shape=(nstates,), flags='C')
 
-        return self.ln.GetNodeBeliefs_bn(node_p)  # prob_bn
+        return self.cnetica.GetNodeBeliefs_bn(node_p)  # prob_bn
 
     def getnetnodes(self, net_p):
         """
@@ -393,34 +292,24 @@ class Netica:
         # is. Looks like an update to the API that is undocumented.
         # TODO: Figure out how to export a list of names from object.
         zerochar_type = c_char * 0
-
         # (const net_bn* net, const char options[])
-
-        self.ln.GetNetNodes2_bn.argtypes = [c_void_p, zerochar_type]
-
-        self.ln.GetNetNodes2_bn.restype = c_void_p
-
-        return self.ln.GetNetNodes2_bn(net_p, zerochar_type())  # nl_p
+        self.cnetica.GetNetNodes2_bn.argtypes = [c_void_p, zerochar_type]
+        self.cnetica.GetNetNodes2_bn.restype = c_void_p
+        return self.cnetica.GetNetNodes2_bn(net_p, zerochar_type())  # nl_p
 
     def lengthnodelist(self, nl_p):
         """Get number of nodes."""
         # (const nodelist_bn* nodes)
-
-        self.ln.LengthNodeList_bn.argtypes = [c_void_p]
-
-        self.ln.LengthNodeList_bn.restype = c_int
-
-        return self.ln.LengthNodeList_bn(nl_p)  # nnodes
+        self.cnetica.LengthNodeList_bn.argtypes = [c_void_p]
+        self.cnetica.LengthNodeList_bn.restype = c_int
+        return self.cnetica.LengthNodeList_bn(nl_p)  # nnodes
 
     def getnodename(self, node_p):
         """Return the node name as string."""
         # (const node_bn* node)
-
-        self.ln.GetNodeName_bn.argtypes = [c_void_p]
-
-        self.ln.GetNodeName_bn.restype = c_char_p
-
-        return self.ln.GetNodeName_bn(node_p)  # name
+        self.cnetica.GetNodeName_bn.argtypes = [c_void_p]
+        self.cnetica.GetNodeName_bn.restype = c_char_p
+        return self.cnetica.GetNodeName_bn(node_p)  # name
 
     def getnodetype(self, node_p):
         """
@@ -431,12 +320,9 @@ class Netica:
 
         """
         # (const node_bn* node)
-
-        self.ln.GetNodeType_bn.argtypes = [c_void_p]
-
-        self.ln.GetNodeType_bn.restype = c_int
-
-        return self.ln.GetNodeType_bn(node_p)  # node_type
+        self.cnetica.GetNodeType_bn.argtypes = [c_void_p]
+        self.cnetica.GetNodeType_bn.restype = c_int
+        return self.cnetica.GetNodeType_bn(node_p)  # node_type
 
     def nthnode(self, nl_p, index):
         """
@@ -447,12 +333,9 @@ class Netica:
 
         """
         # (const nodelist_bn* nodes, int index)
-
-        self.ln.NthNode_bn.argtypes = [c_void_p, c_int]
-
-        self.ln.NthNode_bn.restype = c_void_p
-
-        return self.ln.NthNode_bn(nl_p, index)  # node_p
+        self.cnetica.NthNode_bn.argtypes = [c_void_p, c_int]
+        self.cnetica.NthNode_bn.restype = c_void_p
+        return self.cnetica.NthNode_bn(nl_p, index)  # node_p
 
     def getnodeequation(self, node_p):
         """
@@ -464,12 +347,9 @@ class Netica:
 
         """
         # (const node_bn* node)
-
-        self.ln.GetNodeEquation_bn.argtypes = [c_void_p]
-
-        self.ln.GetNodeEquation_bn.restype = c_char_p
-
-        return self.ln.GetNodeEquation_bn(node_p)  # equation
+        self.cnetica.GetNodeEquation_bn.argtypes = [c_void_p]
+        self.cnetica.GetNodeEquation_bn.restype = c_char_p
+        return self.cnetica.GetNodeEquation_bn(node_p)  # equation
 
     def getnodeexpectedvalue(self, node_p):
         """
@@ -482,21 +362,17 @@ class Netica:
 
         """
         # (node_bn* node, double* std_dev, double* x3, double* x4)
+        self.cnetica.GetNodeExpectedValue_bn.argtypes = [c_void_p, c_double_p,
+                                                         c_double_p, c_double_p]
 
-        self.ln.GetNodeExpectedValue_bn.argtypes = [c_void_p, c_double_p,
-                                                    c_double_p, c_double_p]
-
-        self.ln.GetNodeExpectedValue_bn.restype = c_double
-
+        self.cnetica.GetNodeExpectedValue_bn.restype = c_double
         stdev = c_double(9999)  # standard deviation
-
         x3 = c_double_p()
-
         x4 = c_double_p()
 
         # expected value
-        expvalue = self.ln.GetNodeExpectedValue_bn(node_p,
-                                                   byref(stdev), x3, x4)
+        expvalue = self.cnetica.GetNodeExpectedValue_bn(node_p,
+                                                        byref(stdev), x3, x4)
 
         return expvalue, stdev.value
 
@@ -509,20 +385,15 @@ class Netica:
 
         """
         # (node_bn* node, const char* eqn)
-
-        self.ln.SetNodeEquation_bn.argtypes = [c_void_p, c_char_p]
-
-        self.ln.SetNodeEquation_bn.restype = None
-
-        self.ln.SetNodeEquation_bn(node_p, ccharp(eqn))
+        self.cnetica.SetNodeEquation_bn.argtypes = [c_void_p, c_char_p]
+        self.cnetica.SetNodeEquation_bn.restype = None
+        self.cnetica.SetNodeEquation_bn(node_p, ccharp(eqn))
 
     def setnodetitle(self, node_p, title):
         """Set the node title."""
-        self.ln.SetNodeTitle_bn.argtypes = [c_void_p, c_char_p]
-
-        self.ln.SetNodeTitle_bn.restype = None
-
-        self.ln.SetNodeTitle_bn(node_p, ccharp(title))
+        self.cnetica.SetNodeTitle_bn.argtypes = [c_void_p, c_char_p]
+        self.cnetica.SetNodeTitle_bn.restype = None
+        self.cnetica.SetNodeTitle_bn(node_p, ccharp(title))
 
     def setnodestatenames(self, node_p, state_names):
         """
@@ -533,31 +404,23 @@ class Netica:
         of names is consistent with the actual number of states.
         """
         # (node_bn* node, const char* state_names)
-
-        self.ln.SetNodeStateNames_bn.argtypes = [c_void_p, c_char_p]
-
-        self.ln.SetNodeStateNames_bn.restype = None
-
-        self.ln.SetNodeStateNames_bn(node_p, ccharp(state_names))
+        self.cnetica.SetNodeStateNames_bn.argtypes = [c_void_p, c_char_p]
+        self.cnetica.SetNodeStateNames_bn.restype = None
+        self.cnetica.SetNodeStateNames_bn(node_p, ccharp(state_names))
 
     def setnodestatetitle(self, node_p, state, state_title):
         """Set the node state title(s)."""
-        self.ln.SetNodeStateTitle_bn.argtypes = [c_void_p, c_int, c_char_p]
-
-        self.ln.SetNodeStateTitle_bn.restype = None
-
-        self.ln.SetNodeStateTitle_bn(node_p, state, ccharp(state_title))
+        self.cnetica.SetNodeStateTitle_bn.argtypes = [c_void_p, c_int, c_char_p]
+        self.cnetica.SetNodeStateTitle_bn.restype = None
+        self.cnetica.SetNodeStateTitle_bn(node_p, state, ccharp(state_title))
 
     def setnodelevels(self, node_p, num_states, levels):
         """Set the node levels."""
         # (node_bn* node, int num_states, const level_bn* levels)
-
-        self.ln.SetNodeLevels_bn.argtypes = [c_void_p, c_int, ndpointer(
+        self.cnetica.SetNodeLevels_bn.argtypes = [c_void_p, c_int, ndpointer(
             'double', ndim=1, shape=(len(levels),), flags='C')]
-
-        self.ln.SetNodeLevels_bn.restype = None
-
-        self.ln.SetNodeLevels_bn(node_p, num_states, levels)
+        self.cnetica.SetNodeLevels_bn.restype = None
+        self.cnetica.SetNodeLevels_bn(node_p, num_states, levels)
 
     def equationtotable(self, node_p, num_samples, samp_unc, add_exist):
         """
@@ -568,12 +431,9 @@ class Netica:
 
         """
         # (node_bn* node, int num_samples, bool_ns samp_unc, bool_ns add_exist)
-
-        self.ln.EquationToTable_bn.argtypes = [c_void_p, c_int, c_bool, c_bool]
-
-        self.ln.EquationToTable_bn.restype = None
-
-        self.ln.EquationToTable_bn(node_p, num_samples, samp_unc, add_exist)
+        self.cnetica.EquationToTable_bn.argtypes = [c_void_p, c_int, c_bool, c_bool]
+        self.cnetica.EquationToTable_bn.restype = None
+        self.cnetica.EquationToTable_bn(node_p, num_samples, samp_unc, add_exist)
 
 #    def revisecptsbyfindings(self, nl_p=None, updating=0, degree=0):
 
@@ -589,12 +449,12 @@ class Netica:
 #        # (const nodelist_bn* nodes, int updating, double degree)
 
 
-#        self.ln.ReviseCPTsByFindings_bn.argtypes = [c_void_p, c_void_p, c_int,
+#        self.cnetica.ReviseCPTsByFindings_bn.argtypes = [c_void_p, c_void_p, c_int,
 #                                                    c_double]
 
-#        self.ln.ReviseCPTsByFindings_bn.restype = None
+#        self.cnetica.ReviseCPTsByFindings_bn.restype = None
 
-#        self.ln.ReviseCPTsByFindings_bn(nl_p, updating, degree)
+#        self.cnetica.ReviseCPTsByFindings_bn(nl_p, updating, degree)
 
     def revisecptsbycasefile(self, filename='', nl_p=None,
                              updating=0, degree=0):
@@ -607,73 +467,53 @@ class Netica:
 
         """
         env_p = self.newenv()
-
         file_p = self._newstream(env_p, filename)
 
         # (stream_ns* file, const nodelist_bn* nodes, int updating,
         #  double degree)
+        self.cnetica.ReviseCPTsByCaseFile_bn.argtypes = [c_void_p, c_void_p,
+                                                         c_int, c_double]
 
-        self.ln.ReviseCPTsByCaseFile_bn.argtypes = [c_void_p, c_void_p,
-                                                    c_int, c_double]
-
-        self.ln.ReviseCPTsByCaseFile_bn.restype = None
-
-        self.ln.ReviseCPTsByCaseFile_bn(file_p, nl_p, updating, degree)
+        self.cnetica.ReviseCPTsByCaseFile_bn.restype = None
+        self.cnetica.ReviseCPTsByCaseFile_bn(file_p, nl_p, updating, degree)
 
     def setnodeprobs(self, node_p, parent_states, probs):
         """Set node probabilities."""
         parenttype = ndpointer('int', ndim=1, shape=len(parent_states,),
                                flags='C')
 
-        self.ln.SetNodeProbs_bn.argtypes = [
-
+        self.cnetica.SetNodeProbs_bn.argtypes = [
             c_void_p,
-
             parenttype,
-
             ndpointer('float32', ndim=1, shape=(len(probs),), flags='C')
-
         ]
 
-        self.ln.SetNodeProbs_bn.restype = None
-
-        import pdb
+        self.cnetica.SetNodeProbs_bn.restype = None
 
         pdb.set_trace()
-
-        self.ln.SetNodeProbs_bn(node_p, parent_states, probs)
+        self.cnetica.SetNodeProbs_bn(node_p, parent_states, probs)
 
     def getnodeprobs(self, node_p, parent_states):
         """Get node probabilities."""
         parenttype = ndpointer('int', ndim=1, shape=len(20,), flags='C')
 
-        self.ln.GetNodeProbs_bn.argtypes = [
-
+        self.cnetica.GetNodeProbs_bn.argtypes = [
             c_void_p,
-
             parenttype
-
         ]
 
-        self.ln.GetNodeProbs_bn.restype = c_void_p
-
-        import pdb
-
+        self.cnetica.GetNodeProbs_bn.restype = c_void_p
         pdb.set_trace()
-
-        probs = self.ln.GetNodeProbs_bn(node_p, parent_states)
+        probs = self.cnetica.GetNodeProbs_bn(node_p, parent_states)
 
         return probs
 
     def newnode(self, name=None, num_states=0, net_p=None):
         """Create and return a new node."""
         # (const char* name, int num_states, net_bn* net)
-
-        self.ln.NewNode_bn.argtypes = [c_char_p, c_int, c_void_p]
-
-        self.ln.NewNode_bn.restype = c_void_p
-
-        return self.ln.NewNode_bn(ccharp(name), num_states, net_p)  # node_p
+        self.cnetica.NewNode_bn.argtypes = [c_char_p, c_int, c_void_p]
+        self.cnetica.NewNode_bn.restype = c_void_p
+        return self.cnetica.NewNode_bn(ccharp(name), num_states, net_p)  # node_p
 
     def deletenode(self, node_p=None):
         """
@@ -684,12 +524,9 @@ class Netica:
 
         """
         # (node_bn* node)
-
-        self.ln.DeleteNode_bn.argtypes = [c_void_p]
-
-        self.ln.DeleteNode_bn.restype = None
-
-        self.ln.DeleteNode_bn(node_p)
+        self.cnetica.DeleteNode_bn.argtypes = [c_void_p]
+        self.cnetica.DeleteNode_bn.restype = None
+        self.cnetica.DeleteNode_bn(node_p)
 
     def addlink(self, parent=None, child=None):
         """
@@ -699,11 +536,9 @@ class Netica:
         """
         # (node_bn* parent, node_bn* child)
 
-        self.ln.AddLink_bn.argtypes = [c_void_p, c_void_p]
-
-        self.ln.AddLink_bn.restype = c_int
-
-        return self.ln.AddLink_bn(parent, child)  # link_index
+        self.cnetica.AddLink_bn.argtypes = [c_void_p, c_void_p]
+        self.cnetica.AddLink_bn.restype = c_int
+        return self.cnetica.AddLink_bn(parent, child)  # link_index
 
     def deletelink(self, link_index=1, child=None):
         """
@@ -714,21 +549,17 @@ class Netica:
         """
         # (int link_index, node_bn* child)
 
-        self.ln.DeleteLink_bn.argtypes = [c_int, c_void_p]
-
-        self.ln.DeleteLink_bn.restype = None
-
-        self.ln.DeleteLink_bn(link_index, child)
+        self.cnetica.DeleteLink_bn.argtypes = [c_int, c_void_p]
+        self.cnetica.DeleteLink_bn.restype = None
+        self.cnetica.DeleteLink_bn(link_index, child)
 
     def reverselink(self, parent=None, child=None):
         """Reverse the link between parent and child."""
         # (node_bn* parent, node_bn* child)
 
-        self.ln.ReverseLink_bn.argtypes = [c_void_p, c_void_p]
-
-        self.ln.ReverseLink_bn.restype = None
-
-        return self.ln.ReverseLink_bn(parent, child)  # link_index
+        self.cnetica.ReverseLink_bn.argtypes = [c_void_p, c_void_p]
+        self.cnetica.ReverseLink_bn.restype = None
+        return self.cnetica.ReverseLink_bn(parent, child)  # link_index
 
     def switchnodeparent(self, link_index=1, node_p=None, new_parent=None):
         """
@@ -740,11 +571,8 @@ class Netica:
         function table).
         """
         # (int link_index, node_bn* node, node_bn* new_parent)
-
-        self.ln.ReverseLink_bn.argtypes = [c_int, c_void_p, c_void_p]
-
-        self.ln.ReverseLink_bn.restype = None
-
-        return self.ln.SwitchNodeParent_bn(link_index, node_p, new_parent)
+        self.cnetica.ReverseLink_bn.argtypes = [c_int, c_void_p, c_void_p]
+        self.cnetica.ReverseLink_bn.restype = None
+        return self.cnetica.SwitchNodeParent_bn(link_index, node_p, new_parent)
 
     getnodedata = getnodedata
