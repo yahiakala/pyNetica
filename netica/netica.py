@@ -109,6 +109,7 @@ class NeticaNetwork:
             # Read net from file.
             file_p = self._newstream(self.env, openfile)  # Create stream.
             # Net pointer.
+            # (stream_ns* file, int options)
             self.net = cnetica.ReadNet_bn(file_p, REGULAR_WINDOW)
         else:
             # Create new empty net.
