@@ -142,6 +142,28 @@ cnetica.SetNodeStateTitle_bn.restype = None
 cnetica.EquationToTable_bn.argtypes = [c_void_p, c_int, c_bool, c_bool]
 cnetica.EquationToTable_bn.restype = None
 
+cnetica.NewNode_bn.argtypes = [c_char_p, c_int, c_void_p]
+cnetica.NewNode_bn.restype = c_void_p
+
+cnetica.DeleteNode_bn.argtypes = [c_void_p]
+cnetica.DeleteNode_bn.restype = None
+
+cnetica.ReviseCPTsByCaseFile_bn.argtypes = [c_void_p, c_void_p,
+                                            c_int, c_double]
+cnetica.ReviseCPTsByCaseFile_bn.restype = None
+
+cnetica.AddLink_bn.argtypes = [c_void_p, c_void_p]
+cnetica.AddLink_bn.restype = c_int
+
+cnetica.DeleteLink_bn.argtypes = [c_int, c_void_p]
+cnetica.DeleteLink_bn.restype = None
+
+cnetica.ReverseLink_bn.argtypes = [c_void_p, c_void_p]
+cnetica.ReverseLink_bn.restype = None
+
+cnetica.ReverseLink_bn.argtypes = [c_int, c_void_p, c_void_p]
+cnetica.ReverseLink_bn.restype = None
+
 # The following Netica C functions were configured in the methods
 # due to their input sizes being specific to the nodes.
 # ---------------------------
@@ -325,7 +347,8 @@ class NeticaNetwork:
             # DISCRETE_TYPE
             nlevels = nstates
 
-        print(nstates, nlevels)  # TODO: Figure this out.
+        print(nstates, nlevels)
+        # TODO: Figure this out. Something might be off with T
         T = ndpointer('double', ndim=1, shape=(nlevels,), flags='C')
         # (const node_bn* node)
         res = cnetica.GetNodeLevels_bn(node_p)  # node_levels
@@ -405,6 +428,7 @@ class NeticaNetwork:
 
     def setnodetitle(self, node_p, title):
         """Set the node title."""
+        # (node_bn* node, const char* title)
         cnetica.SetNodeTitle_bn(node_p, ccharp(title))
 
     def setnodestatenames(self, node_p, state_names):
@@ -460,22 +484,20 @@ class NeticaNetwork:
         """Get node probabilities."""
         parenttype = ndpointer('int', ndim=1, shape=len(20,), flags='C')
 
-        self.cnetica.GetNodeProbs_bn.argtypes = [
+        cnetica.GetNodeProbs_bn.argtypes = [
             c_void_p,
             parenttype
         ]
 
-        self.cnetica.GetNodeProbs_bn.restype = c_void_p
+        cnetica.GetNodeProbs_bn.restype = c_void_p
         pdb.set_trace()
-        probs = self.cnetica.GetNodeProbs_bn(node_p, parent_states)
+        probs = cnetica.GetNodeProbs_bn(node_p, parent_states)
 
         return probs
 
     def newnode(self, name=None, num_states=0, net_p=None):
         """Create and return a new node."""
         # (const char* name, int num_states, net_bn* net)
-        cnetica.NewNode_bn.argtypes = [c_char_p, c_int, c_void_p]
-        cnetica.NewNode_bn.restype = c_void_p
         return cnetica.NewNode_bn(ccharp(name), num_states, net_p)
 
     def deletenode(self, node_p=None):
@@ -487,9 +509,7 @@ class NeticaNetwork:
 
         """
         # (node_bn* node)
-        self.cnetica.DeleteNode_bn.argtypes = [c_void_p]
-        self.cnetica.DeleteNode_bn.restype = None
-        self.cnetica.DeleteNode_bn(node_p)
+        cnetica.DeleteNode_bn(node_p)
     # --------------------------------------------------------------------
     # End of functions that require node input.
     # --------------------------------------------------------------------
@@ -574,16 +594,11 @@ class NeticaNetwork:
         node in nodes.
 
         """
-        env_p = self.newenv()
-        file_p = self._newstream(env_p, filename)
+        file_p = self._newstream(self.env, filename)
 
         # (stream_ns* file, const nodelist_bn* nodes, int updating,
         #  double degree)
-        self.cnetica.ReviseCPTsByCaseFile_bn.argtypes = [c_void_p, c_void_p,
-                                                         c_int, c_double]
-
-        self.cnetica.ReviseCPTsByCaseFile_bn.restype = None
-        self.cnetica.ReviseCPTsByCaseFile_bn(file_p, nl_p, updating, degree)
+        cnetica.ReviseCPTsByCaseFile_bn(file_p, nl_p, updating, degree)
     # --------------------------------------------------------------------
     # End of methods involving net operations.
     # --------------------------------------------------------------------
@@ -598,10 +613,7 @@ class NeticaNetwork:
         Returns the index of the added link.
         """
         # (node_bn* parent, node_bn* child)
-
-        self.cnetica.AddLink_bn.argtypes = [c_void_p, c_void_p]
-        self.cnetica.AddLink_bn.restype = c_int
-        return self.cnetica.AddLink_bn(parent, child)  # link_index
+        return cnetica.AddLink_bn(parent, child)  # link_index
 
     def deletelink(self, link_index=1, child=None):
         """
@@ -611,18 +623,12 @@ class NeticaNetwork:
         parent node of child.
         """
         # (int link_index, node_bn* child)
-
-        self.cnetica.DeleteLink_bn.argtypes = [c_int, c_void_p]
-        self.cnetica.DeleteLink_bn.restype = None
-        self.cnetica.DeleteLink_bn(link_index, child)
+        cnetica.DeleteLink_bn(link_index, child)
 
     def reverselink(self, parent=None, child=None):
         """Reverse the link between parent and child."""
         # (node_bn* parent, node_bn* child)
-
-        self.cnetica.ReverseLink_bn.argtypes = [c_void_p, c_void_p]
-        self.cnetica.ReverseLink_bn.restype = None
-        return self.cnetica.ReverseLink_bn(parent, child)  # link_index
+        return cnetica.ReverseLink_bn(parent, child)  # link_index
 
     def switchnodeparent(self, link_index=1, node_p=None, new_parent=None):
         """
@@ -634,9 +640,7 @@ class NeticaNetwork:
         function table).
         """
         # (int link_index, node_bn* node, node_bn* new_parent)
-        self.cnetica.ReverseLink_bn.argtypes = [c_int, c_void_p, c_void_p]
-        self.cnetica.ReverseLink_bn.restype = None
-        return self.cnetica.SwitchNodeParent_bn(link_index, node_p, new_parent)
+        return cnetica.SwitchNodeParent_bn(link_index, node_p, new_parent)
     # --------------------------------------------------------------------
     # End of methods involving links between nodes.
     # --------------------------------------------------------------------
