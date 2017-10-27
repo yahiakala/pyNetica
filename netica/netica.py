@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-  # noqa
+"""
+Created in 2012-2016 by Kees Den Heijer (C.denheijer@tudelft.nl)
 
-"""Created in 2012-2016 by Kees Den Heijer (C.denheijer@tudelft.nl)"""
+Refactored from 2017-present by Yahia Kala (ymzkala@gmail.com)
+"""
 
 # Check out http://www.norsys.com/onLineAPIManual/index.html
 # Check out https://docs.python.org/3.6/library/ctypes.html
@@ -11,7 +14,6 @@ from ctypes import (CDLL, c_char, c_char_p, c_void_p, c_int, c_double,
                     create_string_buffer, c_bool, POINTER, byref)
 from numpy.ctypeslib import ndpointer
 import numpy as np
-from numpy import array
 import platform
 import logging
 import sys
@@ -79,6 +81,41 @@ cnetica.SetNetAutoUpdate_bn.restype = None
 
 cnetica.EnterNodeValue_bn.argtypes = [c_void_p, c_double]
 cnetica.EnterNodeValue_bn.restype = None
+
+cnetica.EnterFinding_bn.argtypes = [c_void_p, c_int]
+cnetica.EnterFinding_bn.restype = None
+
+# EnterNodeLikelihood_bn is configured per node due to varying array sizes.
+
+cnetica.RetractNodeFindings_bn.argtypes = [c_void_p]
+cnetica.RetractNodeFindings_bn.restype = None
+
+cnetica.RetractNetFindings_bn.argtypes = [c_void_p]
+cnetica.RetractNetFindings_bn.restype = None
+
+cnetica.GetNodeNamed_bn.argtypes = [c_char_p, c_void_p]
+cnetica.GetNodeNamed_bn.restype = c_void_p
+
+cnetica.GetNodeNumberStates_bn.argtypes = [c_void_p]
+cnetica.GetNodeNumberStates_bn.restype = c_int
+
+cnetica.GetNodeLevels_bn.argtypes = [c_void_p]
+cnetica.GetNodeLevels_bn.restype = c_void_p
+
+cnetica.GetNodeStateName_bn.argtypes = [c_void_p, c_int]
+cnetica.GetNodeStateName_bn.restype = c_char_p
+
+# GetNodeBeliefs_bn is configured per node due to varying array sizes.
+
+zerochar_type = c_char * 0
+cnetica.GetNetNodes2_bn.argtypes = [c_void_p, zerochar_type]
+cnetica.GetNetNodes2_bn.restype = c_void_p
+
+cnetica.LengthNodeList_bn.argtypes = [c_void_p]
+cnetica.LengthNodeList_bn.restype = c_int
+
+cnetica.GetNodeName_bn.argtypes = [c_void_p]
+cnetica.GetNodeName_bn.restype = c_char_p
 # ------------------------------------------------------------------------
 
 
@@ -98,6 +135,7 @@ class NeticaNetwork:
     def __init__(self, openfile=None, license=None, *args, **kwargs):
         """Initialize the Bayesian Network class object."""
         # Environment pointer. First arg is license.
+        # (const char* license, environ_ns* env, const char* locn)
         self.env = cnetica.NewNeticaEnviron_ns(ccharp(license), None, None)
         # Initialize environment.
         mesg = create_string_buffer(MESGLEN)
@@ -136,8 +174,8 @@ class NeticaNetwork:
 
         Streams are used to prepare for file read or write.
         """
-        # (const char* filename, environ_ns* env, const char* access)
         name = create_string_buffer(ccharp(name))
+        # (const char* filename, environ_ns* env, const char* access)
         return cnetica.NewFileStream_ns(name, self.env, None)  # file_p
 
     def compilenet(self):
@@ -150,51 +188,7 @@ class NeticaNetwork:
         # (net_bn* net, int auto_update)
         cnetica.SetNetAutoUpdate_bn(self.net, auto_update)
 
-    def enternodevalue(self, node_p, value):
-        """Enter node finding as value."""
-        # (node_bn* node, double value)
-        cnetica.EnterNodeValue_bn(node_p, value)
-
-    def enterfinding(self, node_p, state):
-        """
-
-        Enters the discrete finding state for node.
-
-        This means that in the case currently being analyzed, node is known
-        with certainty to have value state.
-
-        """
-        # (	node_bn*  node,   state_bn  state )
-        self.cnetica.EnterFinding_bn.argtypes = [c_void_p, c_int]
-        self.cnetica.EnterFinding_bn.restype = None
-        self.cnetica.EnterFinding_bn(node_p, state)
-
-    def enternodelikelyhood(self, node_p, prob_bn):
-        """
-
-        Enters a likelihood finding for node.
-
-        likelihood is a vector containing one probability for each
-        state of node.
-
-        """
-        nstates = self.getnodenumberstates(node_p)
-        prob_bn = array(prob_bn, dtype='float32')
-        # (node_bn* node, const prob_bn* likelihood)
-        self.cnetica.EnterNodeLikelihood_bn.argtypes = [c_void_p, ndpointer(
-            'float32', ndim=1, shape=(nstates,), flags='C')]
-        # (node_bn* node, const prob_bn* likelihood)
-        self.cnetica.EnterNodeLikelihood_bn.restype = None
-        self.cnetica.EnterNodeLikelihood_bn(node_p, prob_bn)
-
-    def retractnodefindings(self, node_p):
-        """Retract all findings from node."""
-        # (node_bn* node)
-        self.cnetica.RetractNodeFindings_bn.argtypes = [c_void_p]
-        self.cnetica.RetractNodeFindings_bn.restype = None
-        self.cnetica.RetractNodeFindings_bn(node_p)
-
-    def retractnetfindings(self, net_p):
+    def retractnetfindings(self):
         """
 
         Retracts all findings from all nodes.
@@ -204,28 +198,76 @@ class NeticaNetwork:
 
         """
         # (net_bn* net)
-        self.cnetica.RetractNetFindings_bn.argtypes = [c_void_p]
-        self.cnetica.RetractNetFindings_bn.restype = None
-        self.cnetica.RetractNetFindings_bn(net_p)
+        cnetica.RetractNetFindings_bn(self.net)
 
-    def getnodenamed(self, nodename, net_p):
-        """Get node by name."""
-        # (const char* name, const net_bn* net)
-        self.cnetica.GetNodeNamed_bn.argtypes = [c_char_p, c_void_p]
-        self.cnetica.GetNodeNamed_bn.restype = c_void_p
+    # --------------------------------------------------------------------
+    # Functions that require node input.
+    # --------------------------------------------------------------------
+    def getnodenamed(self, nodename):
+        """Get node object by name."""
         # nodename = create_string_buffer(nodename)
-        node_p = self.cnetica.GetNodeNamed_bn(ccharp(nodename), net_p)
+        # (const char* name, const net_bn* net)
+        node_p = cnetica.GetNodeNamed_bn(ccharp(nodename), self.net)
         if node_p is None:
             logger.warning('Node with name "%s" does not exist' % nodename)
 
+    def getnodebeliefs(self, node_p):
+        """Get node beliefs."""
+        nstates = self.getnodenumberstates(node_p)
+        cnetica.GetNodeBeliefs_bn.argtypes = [c_void_p]
+        cnetica.GetNodeBeliefs_bn.restype = ndpointer(
+            'float32', ndim=1, shape=(nstates,), flags='C')
+        # (node_bn* node)
+        return cnetica.GetNodeBeliefs_bn(node_p)  # prob_bn
+
+    def enternodelikelyhood(self, node_p, prob_bn):
+        """
+        Enters a likelihood finding for node.
+
+        prob_bn is a vector containing one probability for each
+        state of node.
+        """
+        nstates = self.getnodenumberstates(node_p)
+        prob_bn = np.array(prob_bn, dtype='float32')
+
+        # Configuring ctypes inputs here because of array size spec.
+        cnetica.EnterNodeLikelihood_bn.argtypes = [c_void_p, ndpointer(
+            'float32', ndim=1, shape=(nstates,), flags='C')]
+        cnetica.EnterNodeLikelihood_bn.restype = None
+        # (node_bn* node, const prob_bn* likelihood)
+        cnetica.EnterNodeLikelihood_bn(node_p, prob_bn)
+
+    def enternodevalue(self, node_p, value):
+        """Enter node finding as value."""
+        # (node_bn* node, double value)
+        cnetica.EnterNodeValue_bn(node_p, value)
+
+    def enterfinding(self, node_p, state):
+        """
+        Enters the discrete finding state for node.
+
+        This means that in the case currently being analyzed, node is known
+        with certainty to have value state.
+        """
+        # (	node_bn*  node,   state_bn  state )
+        cnetica.EnterFinding_bn(node_p, state)
+
+    def retractnodefindings(self, node_p):
+        """Retract all findings from node."""
+        # (node_bn* node)
+        cnetica.RetractNodeFindings_bn(node_p)
+
         return node_p
+
+    def getnodename(self, node_p):
+        """Return the node name as string."""
+        # (const node_bn* node)
+        return cnetica.GetNodeName_bn(node_p)  # name
 
     def getnodenumberstates(self, node_p):
         """Get number of states."""
         # (const node_bn* node)
-        self.cnetica.GetNodeNumberStates_bn.argtypes = [c_void_p]
-        self.cnetica.GetNodeNumberStates_bn.restype = c_int
-        return self.cnetica.GetNodeNumberStates_bn(node_p)  # nstates
+        return cnetica.GetNodeNumberStates_bn(node_p)  # nstates
 
     def getnodelevels(self, node_p):
         """
@@ -246,12 +288,10 @@ class NeticaNetwork:
             # DISCRETE_TYPE
             nlevels = nstates
 
-        print(nstates, nlevels)
-        # (const node_bn* node)
-        self.cnetica.GetNodeLevels_bn.argtypes = [c_void_p]
+        print(nstates, nlevels)  # TODO: Figure this out.
         T = ndpointer('double', ndim=1, shape=(nlevels,), flags='C')
-        self.cnetica.GetNodeLevels_bn.restype = c_void_p
-        res = self.cnetica.GetNodeLevels_bn(node_p)  # node_levels
+        # (const node_bn* node)
+        res = cnetica.GetNodeLevels_bn(node_p)  # node_levels
         if res:
             return np.array(T(res))
         else:
@@ -269,21 +309,12 @@ class NeticaNetwork:
 
         """
         # GetNodeStateName_bn (	const node_bn*  node,   state_bn  state )
-        self.cnetica.GetNodeStateName_bn.argtypes = [c_void_p, c_int]
-        self.cnetica.GetNodeStateName_bn.restype = c_char_p
-        return self.cnetica.GetNodeStateName_bn(node_p, state)  # node_levels
+        return cnetica.GetNodeStateName_bn(node_p, state)  # node_levels
 
-    def getnodebeliefs(self, node_p):
-        """Get node beliefs."""
-        nstates = self.getnodenumberstates(node_p)
-        # (node_bn* node)
-        self.cnetica.GetNodeBeliefs_bn.argtypes = [c_void_p]
-        self.cnetica.GetNodeBeliefs_bn.restype = ndpointer(
-            'float32', ndim=1, shape=(nstates,), flags='C')
-
-        return self.cnetica.GetNodeBeliefs_bn(node_p)  # prob_bn
-
-    def getnetnodes(self, net_p):
+    # --------------------------------------------------------------------
+    # End of functions that require node input.
+    # --------------------------------------------------------------------
+    def getnetnodes(self):
         """
         Get net nodes.
 
@@ -291,26 +322,24 @@ class NeticaNetwork:
         """
         # GetNetNodes2_bn is not listed in the API manual, but GetNetNodes_bn
         # is. Looks like an update to the API that is undocumented.
-        # TODO: Figure out how to export a list of names from object.
-        zerochar_type = c_char * 0
+
         # (const net_bn* net, const char options[])
-        self.cnetica.GetNetNodes2_bn.argtypes = [c_void_p, zerochar_type]
-        self.cnetica.GetNetNodes2_bn.restype = c_void_p
-        return self.cnetica.GetNetNodes2_bn(net_p, zerochar_type())  # nl_p
+        return cnetica.GetNetNodes2_bn(self.net, zerochar_type())  # nl_p
 
+    # --------------------------------------------------------------------
+    # Functions that require node list input.
+    # --------------------------------------------------------------------
     def lengthnodelist(self, nl_p):
-        """Get number of nodes."""
-        # (const nodelist_bn* nodes)
-        self.cnetica.LengthNodeList_bn.argtypes = [c_void_p]
-        self.cnetica.LengthNodeList_bn.restype = c_int
-        return self.cnetica.LengthNodeList_bn(nl_p)  # nnodes
+        """
+        Get number of nodes.
 
-    def getnodename(self, node_p):
-        """Return the node name as string."""
-        # (const node_bn* node)
-        self.cnetica.GetNodeName_bn.argtypes = [c_void_p]
-        self.cnetica.GetNodeName_bn.restype = c_char_p
-        return self.cnetica.GetNodeName_bn(node_p)  # name
+        Input is a node list object.
+        """
+        # (const nodelist_bn* nodes)
+        return cnetica.LengthNodeList_bn(nl_p)  # nnodes
+    # --------------------------------------------------------------------
+    # End of functions that require node list input.
+    # --------------------------------------------------------------------
 
     def getnodetype(self, node_p):
         """
