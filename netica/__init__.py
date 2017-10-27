@@ -1,1 +1,1 @@
-from .netica import Netica
+from .netica import NeticaNetwork  # noqa
