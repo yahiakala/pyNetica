@@ -15,6 +15,8 @@ work with large networks:
 * Netica Application license (Work through the GUI only)
 * Netica API Family license (C, C#, C++, Java, Matlab, Visual Basic, etc.)
 
+Check out http://www.norsys.com/onLineAPIManual/index.html
+for help on the C API functions.
 
 Installation
 ------------
@@ -28,7 +30,7 @@ Installation
     # or
     pip install -e .  # developer install.
 
-Getting Started
+Comparison to SVN Repository Package
 -------------------------------------------------------
 Many simplifications to the workflow were made for typical users working
 in single environments and single nets.

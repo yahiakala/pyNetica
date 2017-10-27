@@ -17,6 +17,7 @@ import numpy as np
 import platform
 import logging
 import pdb
+import types
 
 from helpers import getnodedata, ccharp
 
@@ -255,12 +256,14 @@ class NeticaNetwork:
         # (const net_bn* net, const char options[])
         return cnetica.GetNetNodes2_bn(self.net, zerochar_type())  # nl_p
 
-    def lengthnodelist(self, nl_p):
+    def lengthnodelist(self, nl_p=None):
         """
         Get number of nodes.
 
         Input is a node list object.
         """
+        if not nl_p:
+            nl_p = self.getnetnodes()
         # (const nodelist_bn* nodes)
         return cnetica.LengthNodeList_bn(nl_p)  # nnodes
     # --------------------------------------------------------------------
@@ -275,17 +278,14 @@ class NeticaNetwork:
         # (const char* name, int num_states, net_bn* net)
         return cnetica.NewNode_bn(ccharp(name), num_states, self.net)
 
-    def deletenode(self, nodename=None, node_p=None):
+    def deletenode(self, node_p=None):
         """
         Remove node from net.
 
         Removes node from its net, and frees all resources (e.g. memory)
         it was using.
-
-        Defaults to using nodename.
         """
-        if nodename:
-            node_p = self.getnodenamed(nodename)
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
         # (node_bn* node)
         cnetica.DeleteNode_bn(node_p)
     # --------------------------------------------------------------------
@@ -297,11 +297,17 @@ class NeticaNetwork:
     # --------------------------------------------------------------------
     def getnodenamed(self, nodename):
         """
-        Get node object by name.
+        Get node object/pointer by name.
 
         Node names are unique within a net, but node titles are not.
+        Returns the nodename input if it is not a string (node_p checks)
         """
         # nodename = create_string_buffer(nodename)
+
+        # Return the input if it is not a string (for node_p checks)
+        if not isinstance(nodename, types.StringType):
+            return nodename
+
         # (const char* name, const net_bn* net)
         node_p = cnetica.GetNodeNamed_bn(ccharp(nodename), self.net)
         if node_p is None:
@@ -321,19 +327,19 @@ class NeticaNetwork:
         nodes "nl_p". Default for nl_p is the entire list in self.
 
         """
+        # TODO: create a method called nthnodename
         if not nl_p:
             nl_p = self.getnetnodes()
         # (const nodelist_bn* nodes, int index)
         return cnetica.NthNode_bn(nl_p, index)  # node_p
 
-    def getnodebeliefs(self, nodename=None, node_p=None):
+    def getnodebeliefs(self, node_p=None):
         """
         Get node beliefs.
 
         Will default to using nodename if it exists.
         """
-        if nodename:
-            node_p = self.getnodenamed(nodename)
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
 
         nstates = self.getnodenumberstates(node_p)
         cnetica.GetNodeBeliefs_bn.argtypes = [c_void_p]
@@ -342,19 +348,18 @@ class NeticaNetwork:
         # (node_bn* node)
         return cnetica.GetNodeBeliefs_bn(node_p)  # prob_bn
 
-    def getnodenumberstates(self, nodename=None, node_p=None):
+    def getnodenumberstates(self, node_p=None):
         """
         Get number of states in a node.
 
-        Will default to using nodename if it exists.
+        Will accept node name or object.
         """
-        if nodename:
-            node_p = self.getnodenamed(nodename)
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
 
         # (const node_bn* node)
         return cnetica.GetNodeNumberStates_bn(node_p)  # nstates
 
-    def getnodelevels(self, nodename=None, node_p=None):
+    def getnodelevels(self, node_p=None):
         """
         Get node levels.
 
@@ -364,8 +369,7 @@ class NeticaNetwork:
         from discrete nodes to real numbers.
 
         """
-        if nodename:
-            node_p = self.getnodenamed(nodename)
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
 
         node_type = self.getnodetype(node_p)
         nstates = self.getnodenumberstates(node_p)
@@ -386,7 +390,7 @@ class NeticaNetwork:
         else:
             return None
 
-    def getnodestatename(self, nodename=None, state=0, node_p=None):
+    def getnodestatename(self, node_p, state=0):
         """
         Get node state name.
 
@@ -397,13 +401,12 @@ class NeticaNetwork:
         Either all of the states have names, or none of them do.
 
         """
-        if nodename:
-            node_p = self.getnodenamed(nodename)
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
 
         # GetNodeStateName_bn (	const node_bn*  node,   state_bn  state )
         return cnetica.GetNodeStateName_bn(node_p, state)  # node_levels
 
-    def getnodetype(self, nodename=None, node_p=None):
+    def getnodetype(self, node_p):
         """
         Get node type.
 
@@ -411,8 +414,8 @@ class NeticaNetwork:
         discrete (digital), and CONTINUOUS_TYPE if it is continuous (analog)
 
         """
-        if nodename:
-            node_p = self.getnodenamed()
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (const node_bn* node)
         return cnetica.GetNodeType_bn(node_p)  # node_type
 
@@ -425,6 +428,8 @@ class NeticaNetwork:
         if node does not have an equation.
 
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (const node_bn* node)
         return cnetica.GetNodeEquation_bn(node_p)  # equation
 
@@ -438,6 +443,8 @@ class NeticaNetwork:
         be calculated.
 
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node, double* std_dev, double* x3, double* x4)
         stdev = c_double(9999)  # standard deviation
         x3 = c_double_p()
@@ -446,22 +453,23 @@ class NeticaNetwork:
         # expected value. Also tweaks stdev.value
         expvalue = cnetica.GetNodeExpectedValue_bn(node_p,
                                                    byref(stdev), x3, x4)
-        # TODO: stdev is always 9999
+        # TODO: test out stdev
         return expvalue, stdev.value
 
-    def getnodeprobs(self, node_p, parent_states):
+    def getnodeprobs(self, node_p=None, parent_states=None):
         """Get node probabilities."""
-        parenttype = ndpointer('int', ndim=1, shape=len(20,), flags='C')
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
 
+        parenttype = ndpointer('int', ndim=1, shape=len(20,), flags='C')
         cnetica.GetNodeProbs_bn.argtypes = [
             c_void_p,
             parenttype
         ]
-
         cnetica.GetNodeProbs_bn.restype = c_void_p
+
         pdb.set_trace()
         probs = cnetica.GetNodeProbs_bn(node_p, parent_states)
-
+        # TODO: Test output of this.
         return probs
     # --------------------------------------------------------------------
     # End of methods that get values from nodes.
@@ -470,13 +478,15 @@ class NeticaNetwork:
     # --------------------------------------------------------------------
     # Methods that manipulate existing nodes.
     # --------------------------------------------------------------------
-    def enternodelikelyhood(self, node_p, prob_bn):
+    def enternodelikelyhood(self, node_p=None, prob_bn=None):
         """
         Enters a likelihood finding for node.
 
         prob_bn is a vector containing one probability for each
         state of node.
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         nstates = self.getnodenumberstates(node_p)
         prob_bn = np.array(prob_bn, dtype='float32')
         # TODO: figure out configuration
@@ -487,43 +497,53 @@ class NeticaNetwork:
         # (node_bn* node, const prob_bn* likelihood)
         cnetica.EnterNodeLikelihood_bn(node_p, prob_bn)
 
-    def enternodevalue(self, node_p, value):
+    def enternodevalue(self, node_p=None, value=None):
         """Enter node finding as value."""
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node, double value)
         cnetica.EnterNodeValue_bn(node_p, value)
 
-    def enterfinding(self, node_p, state):
+    def enterfinding(self, node_p=None, state=None):
         """
         Enters the discrete finding state for node.
 
         This means that in the case currently being analyzed, node is known
         with certainty to have value state.
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (	node_bn*  node,   state_bn  state )
         cnetica.EnterFinding_bn(node_p, state)
 
     def retractnodefindings(self, node_p):
         """Retract all findings from node."""
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node)
         cnetica.RetractNodeFindings_bn(node_p)
 
-    def setnodeequation(self, node_p, eqn):
+    def setnodeequation(self, node_p=None, eqn=None):
         """
         Set the node equation.
 
         This associates the equation eqn (a null terminated C character string)
-        as the equation of node.
+        as the equation of the node.
 
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node, const char* eqn)
         cnetica.SetNodeEquation_bn(node_p, ccharp(eqn))
 
-    def setnodetitle(self, node_p, title):
-        """Set the node title."""
+    def setnodetitle(self, node_p=None, title=None):
+        """Set the node title. This can be non-unique."""
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node, const char* title)
         cnetica.SetNodeTitle_bn(node_p, ccharp(title))
 
-    def setnodestatenames(self, node_p, state_names):
+    def setnodestatenames(self, node_p=None, state_names=None):
         """
         Set the node state names.
 
@@ -531,14 +551,17 @@ class NeticaNetwork:
         separators. It can also be newlines. Make sure the number
         of names is consistent with the actual number of states.
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node, const char* state_names)
         cnetica.SetNodeStateNames_bn(node_p, ccharp(state_names))
 
-    def setnodestatetitle(self, node_p, state, state_title):
+    def setnodestatetitle(self, node_p=None, state=None, state_title=None):
         """Set the node state title(s)."""
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
         cnetica.SetNodeStateTitle_bn(node_p, state, ccharp(state_title))
 
-    def setnodelevels(self, node_p, num_states, levels):
+    def setnodelevels(self, node_p=None, num_states=None, levels=None):
         """
         Set the node levels.
 
@@ -548,13 +571,16 @@ class NeticaNetwork:
         On a fresh new node, it will assign the node type as continuous
         or discrete depending on the input.
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node, int num_states, const level_bn* levels)
         cnetica.SetNodeLevels_bn.argtypes = [c_void_p, c_int, ndpointer(
             'double', ndim=1, shape=(len(levels),), flags='C')]
         cnetica.SetNodeLevels_bn.restype = None
         cnetica.SetNodeLevels_bn(node_p, num_states, levels)
 
-    def equationtotable(self, node_p, num_samples, samp_unc, add_exist):
+    def equationtotable(self, node_p=None, num_samples=None,
+                        samp_unc=None, add_exist=None):
         """
         Build table from equation.
 
@@ -562,11 +588,15 @@ class NeticaNetwork:
         associated with it
 
         """
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         # (node_bn* node, int num_samples, bool_ns samp_unc, bool_ns add_exist)
         cnetica.EquationToTable_bn(node_p, num_samples, samp_unc, add_exist)
 
-    def setnodeprobs(self, node_p, parent_states, probs):
+    def setnodeprobs(self, node_p=None, parent_states=None, probs=None):
         """Set node probabilities."""
+        node_p = self.getnodenamed(node_p)  # Verify pointer.
+
         parenttype = ndpointer('int', ndim=1, shape=len(parent_states,),
                                flags='C')
 
@@ -582,14 +612,6 @@ class NeticaNetwork:
 
     # --------------------------------------------------------------------
     # End of methods that manipulate existing nodes.
-    # --------------------------------------------------------------------
-
-    # --------------------------------------------------------------------
-    # Functions that require node list input.
-    # --------------------------------------------------------------------
-
-    # --------------------------------------------------------------------
-    # End of functions that require node list input.
     # --------------------------------------------------------------------
 
     # --------------------------------------------------------------------
@@ -666,6 +688,9 @@ class NeticaNetwork:
 
         Returns the index of the added link.
         """
+        parent = self.getnodenamed(parent)  # verify pointer.
+        child = self.getnodenamed(child)  # verify pointer.
+
         # (node_bn* parent, node_bn* child)
         return cnetica.AddLink_bn(parent, child)  # link_index
 
@@ -676,11 +701,16 @@ class NeticaNetwork:
         Removes the link going to child from the link_indexth
         parent node of child.
         """
+        child = self.getnodenamed(child)  # Verify pointer.
+
         # (int link_index, node_bn* child)
         cnetica.DeleteLink_bn(link_index, child)
 
     def reverselink(self, parent=None, child=None):
         """Reverse the link between parent and child."""
+        parent = self.getnodenamed(parent)  # verify pointer.
+        child = self.getnodenamed(child)  # verify pointer.
+
         # (node_bn* parent, node_bn* child)
         return cnetica.ReverseLink_bn(parent, child)  # link_index
 
@@ -693,6 +723,9 @@ class NeticaNetwork:
         equation, or any of node's tables (such as CPT table or
         function table).
         """
+        node_p = self.getnodenamed(node_p)
+        new_parent = self.getnodenamed(new_parent)
+
         # (int link_index, node_bn* node, node_bn* new_parent)
         return cnetica.SwitchNodeParent_bn(link_index, node_p, new_parent)
     # --------------------------------------------------------------------
