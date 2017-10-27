@@ -16,10 +16,9 @@ from numpy.ctypeslib import ndpointer
 import numpy as np
 import platform
 import logging
-import sys
 import pdb
 
-from helpers import getnodedata
+from helpers import getnodedata, ccharp
 
 logger = logging.getLogger(__name__)
 c_double_p = POINTER(c_double)
@@ -175,16 +174,6 @@ cnetica.ReverseLink_bn.restype = None
 # ------------------------------------------------------------------------
 
 
-def ccharp(inpstr):
-    """Make sure input strings are c_char_p bytes objects."""
-    # https://stackoverflow.com/questions/23852311/different-behaviour-of-ctypes-c-char-p  # noqa
-    if sys.version_info < (3, 0) or 'bytes' in str(type(inpstr)):
-        outstr = inpstr
-    else:
-        outstr = inpstr.encode('utf-8')
-    return outstr
-
-
 class NeticaNetwork:
     """Netica Bayesian Network Class Object."""
 
@@ -193,12 +182,16 @@ class NeticaNetwork:
         # Environment pointer. First arg is license.
         # (const char* license, environ_ns* env, const char* locn)
         self.env = cnetica.NewNeticaEnviron_ns(ccharp(license), None, None)
+        # Most applications have only one environment, but we keep
+        # this environment specific to the object instance.
+
         # Initialize environment.
         mesg = create_string_buffer(MESGLEN)
         # (environ_ns* env, char* mesg)
         self.res = cnetica.InitNetica2_bn(self.env, mesg)
         logger.info(mesg.value)
 
+        # Create net.
         if openfile:
             # Read net from file.
             file_p = self._newstream(self.env, openfile)  # Create stream.
@@ -214,7 +207,12 @@ class NeticaNetwork:
     # Methods involving file operations.
     # --------------------------------------------------------------------
     def closeenv(self):
-        """Close environment."""
+        """
+        Close environment.
+
+        When a Netica environment is closed, no further operations can be
+        done on the object.
+        """
         mesg = create_string_buffer(MESGLEN)
         # (environ_ns* env, char* mesg)
         res = cnetica.CloseNetica_bn(self.env, mesg)
@@ -236,13 +234,12 @@ class NeticaNetwork:
         name = create_string_buffer(ccharp(name))
         # (const char* filename, environ_ns* env, const char* access)
         return cnetica.NewFileStream_ns(name, self.env, None)  # file_p
-
     # --------------------------------------------------------------------
     # End of methods involving file operations.
     # --------------------------------------------------------------------
 
     # --------------------------------------------------------------------
-    # Methods involving getting net/node/link information.
+    # Methods returning node list information.
     # --------------------------------------------------------------------
     def getnetnodes(self):
         """
@@ -255,12 +252,43 @@ class NeticaNetwork:
 
         # (const net_bn* net, const char options[])
         return cnetica.GetNetNodes2_bn(self.net, zerochar_type())  # nl_p
+
+    def lengthnodelist(self, nl_p):
+        """
+        Get number of nodes.
+
+        Input is a node list object.
+        """
+        # (const nodelist_bn* nodes)
+        return cnetica.LengthNodeList_bn(nl_p)  # nnodes
     # --------------------------------------------------------------------
-    # End of methods involving getting net/node/link information.
+    # End of methods returning node list information.
     # --------------------------------------------------------------------
 
     # --------------------------------------------------------------------
-    # Functions that require node input.
+    # Methods that create or delete nodes.
+    # --------------------------------------------------------------------
+    def newnode(self, name=None, num_states=0, net_p=None):
+        """Create and return a new node."""
+        # (const char* name, int num_states, net_bn* net)
+        return cnetica.NewNode_bn(ccharp(name), num_states, net_p)
+
+    def deletenode(self, node_p=None):
+        """
+        Remove node from net.
+
+        Removes node from its net, and frees all resources (e.g. memory)
+        it was using.
+
+        """
+        # (node_bn* node)
+        cnetica.DeleteNode_bn(node_p)
+    # --------------------------------------------------------------------
+    # End of methods that create or delete nodes.
+    # --------------------------------------------------------------------
+
+    # --------------------------------------------------------------------
+    # Methods that get values from nodes.
     # --------------------------------------------------------------------
     def getnodenamed(self, nodename):
         """Get node object by name."""
@@ -271,57 +299,30 @@ class NeticaNetwork:
             logger.warning('Node with name "%s" does not exist' % nodename)
         return node_p
 
+    def getnodename(self, node_p):
+        """Return the node name as string using node object as input."""
+        # (const node_bn* node)
+        return cnetica.GetNodeName_bn(node_p)  # name
+
+    def nthnode(self, nl_p, index):
+        """
+        Get the node pointer.
+
+        Returns the node pointer at position "index" within list of
+        nodes "nl_p"
+
+        """
+        # (const nodelist_bn* nodes, int index)
+        return cnetica.NthNode_bn(nl_p, index)  # node_p
+
     def getnodebeliefs(self, node_p):
         """Get node beliefs."""
-        # TODO: Figure out configuration
         nstates = self.getnodenumberstates(node_p)
         cnetica.GetNodeBeliefs_bn.argtypes = [c_void_p]
         cnetica.GetNodeBeliefs_bn.restype = ndpointer(
             'float32', ndim=1, shape=(nstates,), flags='C')
         # (node_bn* node)
         return cnetica.GetNodeBeliefs_bn(node_p)  # prob_bn
-
-    def enternodelikelyhood(self, node_p, prob_bn):
-        """
-        Enters a likelihood finding for node.
-
-        prob_bn is a vector containing one probability for each
-        state of node.
-        """
-        nstates = self.getnodenumberstates(node_p)
-        prob_bn = np.array(prob_bn, dtype='float32')
-        # TODO: figure out configuration
-        # Configuring ctypes inputs here because of array size spec.
-        cnetica.EnterNodeLikelihood_bn.argtypes = [c_void_p, ndpointer(
-            'float32', ndim=1, shape=(nstates,), flags='C')]
-        cnetica.EnterNodeLikelihood_bn.restype = None
-        # (node_bn* node, const prob_bn* likelihood)
-        cnetica.EnterNodeLikelihood_bn(node_p, prob_bn)
-
-    def enternodevalue(self, node_p, value):
-        """Enter node finding as value."""
-        # (node_bn* node, double value)
-        cnetica.EnterNodeValue_bn(node_p, value)
-
-    def enterfinding(self, node_p, state):
-        """
-        Enters the discrete finding state for node.
-
-        This means that in the case currently being analyzed, node is known
-        with certainty to have value state.
-        """
-        # (	node_bn*  node,   state_bn  state )
-        cnetica.EnterFinding_bn(node_p, state)
-
-    def retractnodefindings(self, node_p):
-        """Retract all findings from node."""
-        # (node_bn* node)
-        cnetica.RetractNodeFindings_bn(node_p)
-
-    def getnodename(self, node_p):
-        """Return the node name as string."""
-        # (const node_bn* node)
-        return cnetica.GetNodeName_bn(node_p)  # name
 
     def getnodenumberstates(self, node_p):
         """Get number of states."""
@@ -415,6 +416,64 @@ class NeticaNetwork:
 
         return expvalue, stdev.value
 
+    def getnodeprobs(self, node_p, parent_states):
+        """Get node probabilities."""
+        parenttype = ndpointer('int', ndim=1, shape=len(20,), flags='C')
+
+        cnetica.GetNodeProbs_bn.argtypes = [
+            c_void_p,
+            parenttype
+        ]
+
+        cnetica.GetNodeProbs_bn.restype = c_void_p
+        pdb.set_trace()
+        probs = cnetica.GetNodeProbs_bn(node_p, parent_states)
+
+        return probs
+    # --------------------------------------------------------------------
+    # End of methods that get values from nodes.
+    # --------------------------------------------------------------------
+
+    # --------------------------------------------------------------------
+    # Methods that manipulate existing nodes.
+    # --------------------------------------------------------------------
+    def enternodelikelyhood(self, node_p, prob_bn):
+        """
+        Enters a likelihood finding for node.
+
+        prob_bn is a vector containing one probability for each
+        state of node.
+        """
+        nstates = self.getnodenumberstates(node_p)
+        prob_bn = np.array(prob_bn, dtype='float32')
+        # TODO: figure out configuration
+        # Configuring ctypes inputs here because of array size spec.
+        cnetica.EnterNodeLikelihood_bn.argtypes = [c_void_p, ndpointer(
+            'float32', ndim=1, shape=(nstates,), flags='C')]
+        cnetica.EnterNodeLikelihood_bn.restype = None
+        # (node_bn* node, const prob_bn* likelihood)
+        cnetica.EnterNodeLikelihood_bn(node_p, prob_bn)
+
+    def enternodevalue(self, node_p, value):
+        """Enter node finding as value."""
+        # (node_bn* node, double value)
+        cnetica.EnterNodeValue_bn(node_p, value)
+
+    def enterfinding(self, node_p, state):
+        """
+        Enters the discrete finding state for node.
+
+        This means that in the case currently being analyzed, node is known
+        with certainty to have value state.
+        """
+        # (	node_bn*  node,   state_bn  state )
+        cnetica.EnterFinding_bn(node_p, state)
+
+    def retractnodefindings(self, node_p):
+        """Retract all findings from node."""
+        # (node_bn* node)
+        cnetica.RetractNodeFindings_bn(node_p)
+
     def setnodeequation(self, node_p, eqn):
         """
         Set the node equation.
@@ -480,62 +539,14 @@ class NeticaNetwork:
         pdb.set_trace()
         cnetica.SetNodeProbs_bn(node_p, parent_states, probs)
 
-    def getnodeprobs(self, node_p, parent_states):
-        """Get node probabilities."""
-        parenttype = ndpointer('int', ndim=1, shape=len(20,), flags='C')
-
-        cnetica.GetNodeProbs_bn.argtypes = [
-            c_void_p,
-            parenttype
-        ]
-
-        cnetica.GetNodeProbs_bn.restype = c_void_p
-        pdb.set_trace()
-        probs = cnetica.GetNodeProbs_bn(node_p, parent_states)
-
-        return probs
-
-    def newnode(self, name=None, num_states=0, net_p=None):
-        """Create and return a new node."""
-        # (const char* name, int num_states, net_bn* net)
-        return cnetica.NewNode_bn(ccharp(name), num_states, net_p)
-
-    def deletenode(self, node_p=None):
-        """
-        Remove node from net.
-
-        Removes node from its net, and frees all resources (e.g. memory)
-        it was using.
-
-        """
-        # (node_bn* node)
-        cnetica.DeleteNode_bn(node_p)
     # --------------------------------------------------------------------
-    # End of functions that require node input.
+    # End of methods that manipulate existing nodes.
     # --------------------------------------------------------------------
 
     # --------------------------------------------------------------------
     # Functions that require node list input.
     # --------------------------------------------------------------------
-    def lengthnodelist(self, nl_p):
-        """
-        Get number of nodes.
 
-        Input is a node list object.
-        """
-        # (const nodelist_bn* nodes)
-        return cnetica.LengthNodeList_bn(nl_p)  # nnodes
-
-    def nthnode(self, nl_p, index):
-        """
-        Get the node pointer.
-
-        Returns the node pointer at position "index" within list of
-        nodes "nl_p"
-
-        """
-        # (const nodelist_bn* nodes, int index)
-        return cnetica.NthNode_bn(nl_p, index)  # node_p
     # --------------------------------------------------------------------
     # End of functions that require node list input.
     # --------------------------------------------------------------------
@@ -591,7 +602,7 @@ class NeticaNetwork:
 
         Reads a file of cases from file and uses them to revise the
         experience and conditional probability tables (CPT) of each
-        node in nodes.
+        node in the input node list.
 
         """
         file_p = self._newstream(self.env, filename)
