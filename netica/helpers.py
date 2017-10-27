@@ -4,6 +4,7 @@ import sys
 
 
 def getnodedata(self, nl_p=None):
+
     """
     Get all data from all nodes listed in the input.
 
@@ -36,7 +37,6 @@ def getnodedata(self, nl_p=None):
                          'probs': prob_bn})
     return nodedata
 
-
 def ccharp(inpstr):
     """Make sure input strings are c_char_p bytes objects."""
     # https://stackoverflow.com/questions/23852311/different-behaviour-of-ctypes-c-char-p  # noqa
@@ -45,3 +45,4 @@ def ccharp(inpstr):
     else:
         outstr = inpstr.encode('utf-8')
     return outstr
+
