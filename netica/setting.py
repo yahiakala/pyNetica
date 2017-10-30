@@ -11,11 +11,10 @@ def setnodeCPT(self, node_p=None, df=None):
     # Checks
     # TODO: Check if DataFrame matches that of getter.
     getdf = self.getnodedataframe(node_p)
-    getdf *= 0
-    df2 = df.copy()
+    df2 = df.copy().astype('float')
     df2 *= 0
 
-    if getdf.equals(df2):
+    if not getdf.equals(df2):
         print("Warning: The indices of the input DataFrame " +
               "don't match those of the CPT.")
 

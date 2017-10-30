@@ -37,7 +37,7 @@ if 'window' in platform.system().lower():
     NETICA_LIB = os.path.join(os.path.split(__file__)[0], '..',
                               'lib', 'Netica.dll')
 else:
-    #    from ctypes import cdll
+    # from ctypes import cdll
     NETICA_LIB = os.path.join(os.path.split(__file__)[0], '..',
                               'lib', 'libnetica.so')
 
@@ -644,7 +644,7 @@ class NeticaNetwork:
     def setnodeprobs(self, node_p=None, parent_states=None, probs=None):
         """Set node conditional probabilities."""
         node_p = self.getnodenamed(node_p)  # Verify pointer.
-
+        probs = np.ascontiguousarray(probs, np.float32)  # Forces contiguous
         if not parent_states:
             parenttype = c_void_p
         else:
@@ -661,7 +661,7 @@ class NeticaNetwork:
 
         cnetica.SetNodeProbs_bn.restype = None
         # pdb.set_trace()
-        cnetica.SetNodeProbs_bn(node_p, parent_states, probs.astype('float32'))
+        cnetica.SetNodeProbs_bn(node_p, parent_states, probs)
     # --------------------------------------------------------------------
     # End of methods that manipulate existing nodes.
     # --------------------------------------------------------------------

@@ -6,10 +6,15 @@ None of these methods are called by methods in netica.py.
 
 import pandas as pd
 import itertools
+import types
 
 
-def getnodedataframe(self, node_p):
-    """Get node conditional probabilities (CPT) in a Pandas DataFrame."""
+def getnodedataframe(self, node_p, df=None):
+    """
+    Get node conditional probabilities (CPT) in a Pandas DataFrame.
+
+    Pass empty = 'yes' if your CPT is empty, otherwise you will get an error.
+    """
     node_p = self.getnodenamed(node_p)  # Verify pointer.
     states = tuple(self.getnodemetadata(node_p)['states'])
 
@@ -17,7 +22,11 @@ def getnodedataframe(self, node_p):
     pnames = tuple([meta['name'] for meta in parentmeta])
     pstates = tuple([tuple(meta['states']) for meta in parentmeta])
 
-    data = self.getnodeprobs(node_p)
+    if df:
+        data = self.getnodeprobs(node_p)
+    else:
+        data = 0.0
+
     if len(parentmeta) > 0:
         indlist = list(itertools.product(*pstates))
         idx = pd.MultiIndex.from_tuples(indlist, names=pnames)
@@ -95,8 +104,9 @@ def getnodemetadata(self, node_p=None):
     nstates = self.getnodenumberstates(node_p)
     isdiscrete = self.getnodetype(node_p) != 1
     if isdiscrete:
-        nodelevels = list(self.getnodelevels(node_p))
-
+        nodelevels = self.getnodelevels(node_p)
+        if not isinstance(nodelevels, types.NoneType):
+            nodelevels = list(nodelevels)
         nodestatenames = [self.getnodestatename(node_p, state=i)
                           for i in range(nstates)]
 
